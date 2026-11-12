@@ -12,25 +12,26 @@ from app.data_prep import dataframe_profile, apply_plan, write_metadata_csv
 from app.llm import get_plan
 from app.ml_train import train_dataset
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 UPLOAD_DIR = ROOT / "uploads"
 OUTPUT_DIR = ROOT / "outputs"
+MODEL_DIR = ROOT / "models"
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+MODEL_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(
     title="INFINITRIX Backend",
     description="Upload a tabular dataset, choose a target and task, then receive an AI-prepared CSV.",
     version="1.0.0",
 )
-# A frontend opened as a local file (code.html) sends Origin: null, so allow all origins.
-# No cookies are used, so credentials stay off. Restrict this list before deploying publicly.
+# Local development frontend. Restrict origins before public deployment.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "null"],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 @app.get("/")
@@ -54,14 +55,11 @@ async def prepare_dataset(
     ext = Path(file.filename).suffix.lower()
     if ext not in {".csv", ".xlsx", ".xls"}:
         raise HTTPException(400, "Only CSV, XLSX, and XLS files are supported.")
-
-    content = await file.read()
+    content = await file.read(MAX_FILE_MB * 1024 * 1024 + 1)
     if len(content) > MAX_FILE_MB * 1024 * 1024:
         raise HTTPException(413, f"File exceeds the {MAX_FILE_MB} MB limit.")
-
     input_path = UPLOAD_DIR / f"{uuid.uuid4().hex}{ext}"
     input_path.write_bytes(content)
-
     try:
         if ext == ".csv":
             try:
@@ -70,50 +68,36 @@ async def prepare_dataset(
                 df = pd.read_csv(input_path, encoding="latin-1")
         else:
             df = pd.read_excel(input_path)
-
         if df.empty:
             raise ValueError("The uploaded file has no data rows.")
         if len(df.columns) < 2:
             raise ValueError("The dataset must contain at least two columns.")
+        df.columns = [str(c).strip() for c in df.columns]
         if df.columns.duplicated().any():
             raise ValueError("The dataset contains duplicate column names. Rename them and upload again.")
-        df.columns = [str(c).strip() for c in df.columns]
         if target_column not in df.columns:
-            raise ValueError(
-                f"Target column '{target_column}' was not found. Available columns: {', '.join(df.columns)}"
-            )
-
+            raise ValueError(f"Target column '{target_column}' was not found. Available columns: {', '.join(df.columns)}")
         profile = dataframe_profile(df)
         plan = get_plan(profile, target_column, model_type)
         cleaned, summary = apply_plan(df, target_column, plan)
-
         output_name = f"{Path(file.filename).stem}_cleaned_{uuid.uuid4().hex[:8]}.csv"
         output_path = OUTPUT_DIR / output_name
         write_metadata_csv(cleaned, target_column, model_type, str(output_path))
-
         return {
-            "status": "success",
-            "original_filename": file.filename,
-            "cleaned_filename": output_name,
-            "target_column": target_column,
-            "model_type": model_type,
-            "rows": int(cleaned.shape[0]),
-            "columns": int(cleaned.shape[1]),
-            "ai_provider": "OpenRouter",
+            "status": "success", "original_filename": file.filename,
+            "cleaned_filename": output_name, "target_column": target_column,
+            "model_type": model_type, "rows": int(cleaned.shape[0]),
+            "columns": int(cleaned.shape[1]), "ai_provider": "OpenRouter",
             "ai_model": os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free"),
             "ai_reasoning": str(plan.get("reasoning", "")),
-            "cleaning_summary": summary,
-            "download_url": f"/download/{output_name}",
+            "cleaning_summary": summary, "download_url": f"/download/{output_name}",
         }
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
     finally:
-        try:
-            input_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        input_path.unlink(missing_ok=True)
 
 @app.post("/train")
 async def train_model(
@@ -121,16 +105,14 @@ async def train_model(
     target_column: str = Form(...),
     model_type: str = Form(...),
 ):
-    """Train and compare general-purpose ML models on the cleaned CSV."""
     if model_type not in {"REGRESSION", "CLASSIFICATION"}:
         raise HTTPException(400, "model_type must be REGRESSION or CLASSIFICATION.")
     if not file.filename or Path(file.filename).suffix.lower() != ".csv":
         raise HTTPException(400, "Training expects the cleaned CSV file.")
-    content = await file.read()
+    content = await file.read(MAX_FILE_MB * 1024 * 1024 + 1)
     if len(content) > MAX_FILE_MB * 1024 * 1024:
         raise HTTPException(413, f"File exceeds the {MAX_FILE_MB} MB limit.")
     try:
-        # Cleaned exports have two metadata comment lines before the CSV header.
         from io import BytesIO
         try:
             df = pd.read_csv(BytesIO(content), skiprows=2)
@@ -147,7 +129,6 @@ async def train_model(
 
 @app.get("/download/{filename}")
 def download_file(filename: str):
-    # Prevent path traversal; only serve files inside OUTPUT_DIR.
     safe_name = Path(filename).name
     path = OUTPUT_DIR / safe_name
     if not path.is_file():
