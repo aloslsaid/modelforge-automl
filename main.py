@@ -54,7 +54,9 @@ async def prepare_dataset(
     if ext not in {".csv", ".xlsx", ".xls"}:
         raise HTTPException(400, "Only CSV, XLSX, and XLS files are supported.")
 
-    content = await file.read()
+    # Read at most one byte beyond the configured cap to avoid loading an
+    # arbitrarily large upload into memory before rejecting it.
+    content = await file.read(MAX_FILE_MB * 1024 * 1024 + 1)
     if len(content) > MAX_FILE_MB * 1024 * 1024:
         raise HTTPException(413, f"File exceeds the {MAX_FILE_MB} MB limit.")
 
@@ -127,7 +129,8 @@ async def train_model(
         raise HTTPException(400, "model_type must be REGRESSION or CLASSIFICATION.")
     if not file.filename or Path(file.filename).suffix.lower() != ".csv":
         raise HTTPException(400, "Training expects the cleaned CSV file.")
-    content = await file.read()
+    # Bound memory use even when a client sends a much larger file.
+    content = await file.read(MAX_FILE_MB * 1024 * 1024 + 1)
     if len(content) > MAX_FILE_MB * 1024 * 1024:
         raise HTTPException(413, f"File exceeds the {MAX_FILE_MB} MB limit.")
     try:
