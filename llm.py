@@ -1,6 +1,6 @@
 import json
 import httpx
-from app.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL
+from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL
 
 SYSTEM_PROMPT = """You are a careful tabular-data preparation assistant.
 Return ONLY valid JSON. Do not return markdown or code.
@@ -36,7 +36,7 @@ Only include columns that exist in the dataset. Keep actions conservative.
 
 def get_plan(profile: dict, target: str, model_type: str) -> dict:
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "PASTE_YOUR_OPENROUTER_KEY_HERE":
-        raise RuntimeError("OPENROUTER_API_KEY is missing. Add it to backend/.env.")
+        raise RuntimeError("OPENROUTER_API_KEY is missing. Add it to the project-root .env.")
     user_payload = {
         "target_column": target,
         "model_type": model_type,
