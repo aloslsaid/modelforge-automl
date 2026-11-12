@@ -7,12 +7,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import MAX_FILE_MB
-from app.data_prep import dataframe_profile, apply_plan, write_metadata_csv
-from app.llm import get_plan
-from app.ml_train import train_dataset
+from config import MAX_FILE_MB
+from data_prep import dataframe_profile, apply_plan, write_metadata_csv
+from llm import get_plan
+from ml_train import train_dataset
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 UPLOAD_DIR = ROOT / "uploads"
 OUTPUT_DIR = ROOT / "outputs"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -23,8 +23,7 @@ app = FastAPI(
     description="Upload a tabular dataset, choose a target and task, then receive an AI-prepared CSV.",
     version="1.0.0",
 )
-# A frontend opened as a local file (code.html) sends Origin: null, so allow all origins.
-# No cookies are used, so credentials stay off. Restrict this list before deploying publicly.
+# Local development only. Restrict origins before exposing this API publicly.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -78,6 +77,8 @@ async def prepare_dataset(
         if df.columns.duplicated().any():
             raise ValueError("The dataset contains duplicate column names. Rename them and upload again.")
         df.columns = [str(c).strip() for c in df.columns]
+        if df.columns.duplicated().any():
+            raise ValueError("Column names must be unique after trimming whitespace.")
         if target_column not in df.columns:
             raise ValueError(
                 f"Target column '{target_column}' was not found. Available columns: {', '.join(df.columns)}"
@@ -130,7 +131,6 @@ async def train_model(
     if len(content) > MAX_FILE_MB * 1024 * 1024:
         raise HTTPException(413, f"File exceeds the {MAX_FILE_MB} MB limit.")
     try:
-        # Cleaned exports have two metadata comment lines before the CSV header.
         from io import BytesIO
         try:
             df = pd.read_csv(BytesIO(content), skiprows=2)
