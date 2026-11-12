@@ -1,22 +1,83 @@
 # ModelForge AutoML
 
-ModelForge is an experimental dataset-preparation and AutoML project. Its Python modules cover data preparation, configuration, language-model integration, schemas, model training, and a `main.py` entry point. The project description presents automated cleaning and model comparison; inspect the implementation and its limits before using it on important data.
+AI-assisted tabular-data preparation and model comparison using FastAPI, pandas, scikit-learn, and OpenRouter.
 
-## Requirements and configuration
+## Features
+- CSV/XLSX/XLS upload with a configurable size limit.
+- Dataset profiling and AI-generated conservative cleaning plans.
+- Allow-listed transformations; model output is treated as untrusted data, never executable code.
+- Target-column protection during preparation.
+- Regression and classification model comparison with preprocessing pipelines.
+- Held-out evaluation metrics and serialized model artifacts.
 
-1. Install Python and create a virtual environment.
-2. Install declared packages with `python -m pip install -r requirements.txt`.
-3. Review `config.py` and `llm.py` for required configuration. Keep provider keys in environment variables or a local untracked `.env`; do not commit secrets.
-4. Review `main.py` to confirm the supported launch command and required input format.
+## Structure
+- `main.py`: FastAPI application and API routes.
+- `config.py`: environment-based configuration.
+- `data_prep.py`: dataset profiling and safe transformations.
+- `llm.py`: OpenRouter integration.
+- `ml_train.py`: model candidates, preprocessing, evaluation, and model persistence.
+- `schemas.py`: request and response schemas.
+- `uploads/`, `outputs/`, `models/`: runtime storage.
 
-## Important layout note
+## Requirements and installation
+Python 3.10+ and the packages in `requirements.txt`.
 
-The repository root contains `main.py`, not the `app/main.py` package path used by the earlier README instructions. Thus `uvicorn app.main:app` is not verified for the currently tracked layout. Check imports and the actual entry point before trying to launch a service. `code.html` is also present; it is not a substitute for the Python source.
+```bash
+git clone https://github.com/aloslsaid/modelforge-automl.git
+cd modelforge-automl
+python -m venv .venv
+```
 
-## Data safety and limitations
+Windows PowerShell:
+```powershell
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-Do not upload confidential, personal, or regulated data to an external model provider unless you have authorization and have reviewed that provider's data policy. Treat model-generated plans and outputs as untrusted; validate them and preserve the original dataset. The project does not guarantee that generated transformations are appropriate for a particular model or use case.
+macOS/Linux:
+```bash
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-## Tests
+Create a local `.env` file and set `OPENROUTER_API_KEY`. Never commit real credentials. Optional settings include `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL`, and `MAX_FILE_MB`.
 
-No test files were visible at the repository root and no verified test command is available. Add tests for malformed files, target-column protection, allowed transformations, reproducibility, and failures from external services. Report measured model quality only after a reproducible evaluation on held-out data.
+## Run
+
+From the repository root:
+```bash
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+- API: `http://127.0.0.1:8000`
+- Health: `http://127.0.0.1:8000/health`
+- Swagger: `http://127.0.0.1:8000/docs`
+
+## API
+
+### `POST /prepare`
+Multipart fields: `file` (CSV/XLSX/XLS), `target_column` (exact column name), and `model_type` (`REGRESSION` or `CLASSIFICATION`). Returns a preparation summary and a download URL.
+
+### `GET /download/{filename}`
+Downloads a generated prepared CSV.
+
+### `POST /train`
+Multipart fields: `file` (prepared CSV), `target_column`, and `model_type`. Returns up to five model comparisons, metrics, and a generated model identifier.
+
+## Evaluation
+Regression metrics: R², MAE, RMSE. Classification metrics: accuracy, weighted precision, weighted recall, weighted F1. Numeric and categorical preprocessing is fitted inside scikit-learn pipelines. The target is excluded from the feature matrix. Results depend on the data and split; they are not guarantees of future performance.
+
+## Data safety and security
+- The AI receives a profile/sample of uploaded data to recommend transformations. Do not upload confidential or regulated data unless authorized and comfortable with the provider's data policy.
+- The model returns a JSON plan, not Python code. The backend applies only supported operations and validates column names.
+- Keep credentials in environment variables or an untracked `.env`.
+- The development server is intended for localhost. Before public deployment, add authentication, rate limiting, strict CORS, storage quotas, retention controls, and access restrictions.
+- Treat uploaded files, model outputs, and serialized artifacts as untrusted. Do not load joblib files from unknown sources.
+
+## Limitations
+AI cleaning is heuristic and requires review. Model search may be expensive. The default random split is not appropriate for every time-series or grouped dataset; use domain-specific splitting where needed. No production readiness or predictive performance is guaranteed.
+
+## License
+No license file is currently included; add a license explicitly if you intend to grant reuse rights.
