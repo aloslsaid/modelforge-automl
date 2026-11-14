@@ -1,66 +1,75 @@
-# INFINITRIX Backend — AI CSV Preparation
+# ModelForge AutoML — AI-Assisted Tabular Machine Learning
 
-Backend only. No frontend. FastAPI provides interactive testing at `/docs`.
+> A FastAPI-based AutoML backend that profiles datasets, proposes safe preparation steps with an LLM, and compares machine-learning models for regression or classification.
 
-## What it does
-1. Accepts CSV, XLSX, or XLS.
-2. Reads the dataset and profiles columns, types, missing values, unique values, and sample rows.
-3. You provide `target_column` and `model_type` (`REGRESSION` or `CLASSIFICATION`).
-4. Sends a compact profile/sample to OpenRouter using the configured model.
-5. The AI returns a constrained JSON cleaning/feature-engineering plan.
-6. Python validates the plan and executes only allowlisted operations locally.
-7. Produces a downloadable CSV with two metadata lines before the regular CSV header:
-   - `# wanted_column="..."`
-   - `# model_type=REGRESSION` or `# model_type=CLASSIFICATION`
+## Overview
+ModelForge is built to automate repetitive parts of a tabular ML workflow. It accepts a dataset, inspects its structure, asks an OpenRouter model to propose a constrained preparation plan, validates that plan in Python, and trains candidate estimators for the task selected by the user.
 
-The target column is protected from cleaning, encoding, scaling, and feature creation. The AI never receives permission to execute Python code.
+## Workflow
+1. Upload CSV, XLSX, or XLS data.
+2. Profile rows, columns, types, missing values, unique values, and representative samples.
+3. Select a target column and choose `REGRESSION` or `CLASSIFICATION`.
+4. Generate a structured AI cleaning/feature-engineering plan.
+5. Validate all proposed actions against an allowlist and the actual dataset columns.
+6. Apply safe transformations locally while keeping the target column unchanged.
+7. Train and compare candidate models using cross-validation and hyperparameter search.
+8. Evaluate the strongest candidates on a held-out test split.
+9. Save the selected fitted pipeline and metadata as a Joblib artifact.
 
-## Setup (Windows PowerShell)
+## AI-assisted preparation
+Supported operations include trimming whitespace, normalizing blank strings, median imputation for numeric features, mode imputation for categorical features, identifying constant columns, detecting date columns, creating calendar components, and encoding categorical values. The AI proposes actions; deterministic application code validates column names and prevents the target from being modified.
 
-```powershell
-cd path\to\infinitrix_backend
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+## Model evaluation
+**Regression:** R², MAE, and RMSE.
+
+**Classification:** Accuracy, weighted Precision, weighted Recall, weighted F1, and binary decision-threshold optimization where supported.
+
+The project description advertises comparisons across 15 regression and 15 classification algorithms. Model availability and successful fitting depend on the dataset's size, data types, class distribution, and estimator constraints.
+
+## Stack
+Python · FastAPI · Pandas · NumPy · Scikit-learn · HTTPX · OpenRouter · Pydantic · Joblib · openpyxl
+
+## Install
+```bash
+git clone https://github.com/aloslsaid/modelforge-automl.git
+cd modelforge-automl
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-Copy-Item .env.example .env
-notepad .env
 ```
 
-Put your OpenRouter key after `OPENROUTER_API_KEY=` and save `.env`.
-Do not put the key in Python source code or upload `.env` to GitHub.
-
-## Run
-
-```powershell
-uvicorn app.main:app --reload
+Create a local `.env`:
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1/chat/completions
+OPENROUTER_MODEL=nvidia/nemotron-3.5-super-vl:free
+MAX_FILE_MB=30
+MAX_ROWS_FOR_AI_SAMPLE=20
 ```
+Never commit real API credentials. The model can be changed to one available to your OpenRouter account.
 
-Open `http://127.0.0.1:8000/docs`.
+## API endpoints
+- `GET /` — service information.
+- `GET /health` — health check.
+- `POST /prepare` — upload and prepare a dataset.
+- `POST /train` — train and compare models.
+- `GET /download/{filename}` — download generated files.
 
-## Test
-- Expand `POST /prepare`.
-- Choose a CSV/XLSX file.
-- Enter the exact target column name, e.g. `Churn`.
-- Enter `CLASSIFICATION` for categories/classes or `REGRESSION` for numeric values.
-- Execute. The response contains a `download_url`.
-- Open `http://127.0.0.1:8000` + the returned download URL to download the prepared CSV.
+The interactive API documentation is available at `http://127.0.0.1:8000/docs` after successful startup.
 
-## Important CSV format
-The output intentionally starts with two comment-style metadata rows. The future ML `main.py` should read them with:
-
-```python
-with open("dataset_cleaned.csv", encoding="utf-8-sig") as f:
-    wanted_column = f.readline().strip().split("=", 1)[1]
-    model_type = f.readline().strip().split("=", 1)[1]
-import pandas as pd
-df = pd.read_csv("dataset_cleaned.csv", skiprows=2)
+## Launch command and source-layout caveat
+Intended command:
+```bash
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
+The current root files are flat, but `main.py` imports modules through `app.*` paths. The package layout must match those imports for startup to succeed. This documentation update does not alter the source or claim that a fresh runtime test has passed.
 
-This means the CSV is not a plain CSV from line 1; always use `skiprows=2` when loading it for ML.
+## ML reliability
+Automated model selection is not a guarantee of generalization. Inspect data leakage, class imbalance, target quality, validation design, and performance on truly unseen data before deployment.
 
-## Notes
-- OpenRouter free models can be rate-limited or unavailable temporarily.
-- AI output is treated as an untrusted plan and validated before execution.
-- This initial version does not train a model. It only prepares the dataset and writes the metadata required by the next stage.
-- For production, add authentication, file retention limits, job queueing, and stronger CSV/XLSX validation.
+## Skills demonstrated
+AutoML · LLM-assisted preparation · Feature engineering · Model selection · Cross-validation · Hyperparameter search · FastAPI · Model persistence
